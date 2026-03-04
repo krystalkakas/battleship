@@ -13,11 +13,11 @@ const SHIP_TYPES = [
 ];
 
 const SOUNDS = {
-  hit: 'https://cdn.freesound.org/previews/536/536421_11881477-lq.mp3', // Explosion
-  miss: 'https://cdn.freesound.org/previews/273/273337_4486188-lq.mp3', // Splash
-  bgm: 'https://cdn.freesound.org/previews/655/655513_11537234-lq.mp3', // Ambient
-  turn: 'https://cdn.freesound.org/previews/215/215438_3943373-lq.mp3', // Notification
-  sunk: 'https://cdn.freesound.org/previews/414/414346_5121236-lq.mp3'  // Sinking
+  hit: 'https://actions.google.com/sounds/v1/explosions/artillery_fire.ogg',
+  miss: 'https://actions.google.com/sounds/v1/water/water_splash.ogg',
+  bgm: 'https://actions.google.com/sounds/v1/science_fiction/low_hum_loop.ogg',
+  turn: 'https://actions.google.com/sounds/v1/alarms/digital_watch_alarm_long.ogg',
+  sunk: 'https://actions.google.com/sounds/v1/impacts/crash_metal.ogg'
 };
 
 // --- Components ---
@@ -160,8 +160,14 @@ export default function App() {
   const [nameInput, setNameInput] = useState('');
   const [availableRooms, setAvailableRooms] = useState<any[]>([]);
   
+  const roomRef = useRef<GameRoom | null>(null);
+  useEffect(() => {
+    roomRef.current = room;
+  }, [room]);
+
   // Audio State
   const [isMuted, setIsMuted] = useState(false);
+  const [audioUnlocked, setAudioUnlocked] = useState(false);
   const bgmRef = useRef<HTMLAudioElement | null>(null);
   const lastShotCountRef = useRef<number>(0);
   const lastTurnRef = useRef<string | null>(null);
@@ -182,10 +188,17 @@ export default function App() {
   };
 
   const playSfx = (type: keyof typeof SOUNDS) => {
-    if (isMuted) return;
+    if (isMuted || !audioUnlocked) return;
     const audio = new Audio(SOUNDS[type]);
-    audio.volume = type === 'bgm' ? 0.2 : 0.6;
-    audio.play().catch(() => {});
+    audio.volume = type === 'bgm' ? 0.15 : 0.5;
+    audio.play().catch((e) => console.warn("SFX play failed:", e));
+  };
+
+  const unlockAudio = () => {
+    setAudioUnlocked(true);
+    if (bgmRef.current && !isMuted) {
+      bgmRef.current.play().catch(() => {});
+    }
   };
 
   const showNotification = (msg: string) => {
@@ -240,7 +253,7 @@ export default function App() {
         const totalShots = allPlayers.flatMap(p => p.shots).length;
         
         if (totalShots > lastShotCountRef.current) {
-          const shooter = allPlayers.find(p => p.shots.length > (room?.players.find(oldP => oldP.id === p.id)?.shots.length || 0));
+          const shooter = allPlayers.find(p => p.shots.length > (roomRef.current?.players.find(oldP => oldP.id === p.id)?.shots.length || 0));
           if (shooter) {
             const latestShot = shooter.shots[shooter.shots.length - 1];
             playSfx(latestShot.hit ? 'hit' : 'miss');
@@ -260,7 +273,17 @@ export default function App() {
                 if (isSunk) {
                   sunkShipsRef.current.add(ship.id);
                   playSfx('sunk');
-                  showNotification(`${shooter.id === myId ? 'Bạn' : 'Đối phương'} đã đánh chìm tàu ${ship.length} ô!`);
+                  
+                  const shooterName = shooter.name || shooter.id.substring(0, 4);
+                  const victimName = victim.name || victim.id.substring(0, 4);
+                  
+                  if (shooter.id === myId) {
+                    showNotification(`Bạn đã đánh chìm tàu ${ship.length} ô của ${victimName}!`);
+                  } else if (victim.id === myId) {
+                    showNotification(`Tàu ${ship.length} ô của bạn đã bị ${shooterName} đánh chìm!`);
+                  } else {
+                    showNotification(`Tàu ${ship.length} ô của ${victimName} đã bị ${shooterName} đánh chìm!`);
+                  }
                 }
               });
             }
@@ -290,12 +313,8 @@ export default function App() {
 
   const joinRoom = (id: string) => {
     if (!socket || !id.trim()) return;
+    unlockAudio();
     socket.send(JSON.stringify({ type: 'join_room', roomId: id.trim().toUpperCase(), name: nameInput }));
-    
-    // Start music on first interaction
-    if (bgmRef.current && !isMuted) {
-      bgmRef.current.play().catch(() => {});
-    }
   };
 
   const createRoom = () => {
@@ -381,9 +400,58 @@ export default function App() {
 
   const totalShipsToPlace = SHIP_TYPES.reduce((acc, t) => acc + t.count, 0);
 
-  if (!room) {
-    return (
-      <div className="min-h-screen bg-[#0a0a0c] text-white flex flex-col items-center justify-center p-6 font-sans">
+  return (
+    <div className="min-h-screen bg-[#050505] text-white font-sans selection:bg-indigo-500/30 overflow-x-hidden">
+      {/* Audio Unlock Overlay */}
+      <AnimatePresence>
+        {!audioUnlocked && (
+          <motion.div 
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[100] bg-black/95 backdrop-blur-xl flex flex-col items-center justify-center p-6 text-center"
+          >
+            <motion.div 
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              transition={{ delay: 0.2 }}
+              className="max-w-md space-y-10"
+            >
+              <div className="relative">
+                <div className="absolute inset-0 bg-indigo-500/20 blur-3xl rounded-full" />
+                <div className="relative bg-indigo-600 w-24 h-24 rounded-[2rem] flex items-center justify-center mx-auto shadow-[0_0_50px_rgba(79,70,229,0.5)] border border-indigo-400/50">
+                  <Volume2 size={48} className="text-white animate-pulse" />
+                </div>
+              </div>
+              
+              <div className="space-y-4">
+                <h1 className="text-5xl font-black uppercase italic tracking-tighter leading-none">
+                  Bắn Thuyền <span className="text-indigo-500">Online</span>
+                </h1>
+                <div className="h-1 w-20 bg-indigo-500 mx-auto rounded-full" />
+                <p className="text-slate-400 text-sm leading-relaxed uppercase tracking-[0.2em] font-medium">
+                  Kích hoạt hệ thống âm thanh chiến trận và radar để bắt đầu nhiệm vụ.
+                </p>
+              </div>
+
+              <button 
+                onClick={unlockAudio}
+                className="group relative w-full py-5 rounded-2xl font-black uppercase tracking-[0.3em] text-sm overflow-hidden transition-all hover:scale-105 active:scale-95 shadow-2xl shadow-indigo-500/20"
+              >
+                <div className="absolute inset-0 bg-white transition-transform group-hover:scale-110" />
+                <span className="relative z-10 text-black">Bắt đầu nhiệm vụ</span>
+              </button>
+              
+              <p className="text-[10px] text-slate-600 uppercase tracking-widest font-bold">
+                Trình duyệt yêu cầu tương tác để phát âm thanh
+              </p>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {!room ? (
+        <div className="min-h-screen flex flex-col items-center justify-center p-6">
         <motion.div 
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
@@ -464,13 +532,10 @@ export default function App() {
           </div>
         </motion.div>
       </div>
-    );
-  }
-
-  return (
-    <div className="min-h-screen bg-[#0a0a0c] text-white flex flex-col p-4 md:p-8 font-sans overflow-hidden">
-      {/* Header */}
-      <div className="flex items-center justify-between mb-8">
+    ) : (
+      <div className="flex-1 flex flex-col p-4 md:p-8 overflow-hidden">
+        {/* Header */}
+        <div className="flex items-center justify-between mb-8">
         <div className="flex items-center gap-4">
           <div className="bg-indigo-600 p-2 rounded-lg">
             <ShipIcon size={24} />
@@ -776,6 +841,8 @@ export default function App() {
         </div>
       </div>
     </div>
-  );
+  )}
+</div>
+);
 }
 
