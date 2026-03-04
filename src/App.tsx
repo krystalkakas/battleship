@@ -192,8 +192,13 @@ export default function App() {
   };
 
   const joinRoom = (id: string) => {
-    if (!socket) return;
-    socket.send(JSON.stringify({ type: 'join_room', roomId: id, name: nameInput }));
+    if (!socket || !id.trim()) return;
+    socket.send(JSON.stringify({ type: 'join_room', roomId: id.trim().toUpperCase(), name: nameInput }));
+  };
+
+  const createRoom = () => {
+    const newRoomId = Math.random().toString(36).substring(2, 8).toUpperCase();
+    joinRoom(newRoomId);
   };
 
   const leaveRoom = () => {
@@ -290,21 +295,37 @@ export default function App() {
               />
             </div>
 
+            <div className="pt-2">
+              <button 
+                onClick={createRoom}
+                className="w-full bg-indigo-600 hover:bg-indigo-500 py-4 rounded-xl font-black uppercase tracking-widest transition-all shadow-lg shadow-indigo-500/20 flex items-center justify-center gap-3 group"
+              >
+                <Plus size={20} className="group-hover:rotate-90 transition-transform" /> 
+                Create New Battleground
+              </button>
+            </div>
+
+            <div className="relative flex items-center py-2">
+              <div className="flex-grow border-t border-white/5"></div>
+              <span className="flex-shrink mx-4 text-[10px] font-bold text-slate-600 uppercase tracking-widest">OR</span>
+              <div className="flex-grow border-t border-white/5"></div>
+            </div>
+
             <div className="space-y-4">
-              <label className="block text-xs font-bold uppercase tracking-widest text-slate-500">Join Room</label>
+              <label className="block text-xs font-bold uppercase tracking-widest text-slate-500">Join Existing Room</label>
               <div className="flex gap-2">
                 <input 
                   type="text" 
                   placeholder="ROOM ID..."
                   value={roomIdInput}
                   onChange={e => setRoomIdInput(e.target.value)}
-                  className="flex-1 bg-black/50 border border-white/10 rounded-lg px-4 py-3 focus:outline-none focus:border-indigo-500 transition-colors"
+                  className="flex-1 bg-black/50 border border-white/10 rounded-lg px-4 py-3 focus:outline-none focus:border-indigo-500 transition-colors font-mono"
                 />
                 <button 
                   onClick={() => joinRoom(roomIdInput)}
-                  className="bg-indigo-600 hover:bg-indigo-500 px-6 rounded-lg font-bold transition-colors flex items-center gap-2"
+                  className="bg-white/5 hover:bg-white/10 border border-white/10 px-6 rounded-lg font-bold transition-colors flex items-center gap-2"
                 >
-                  <Plus size={18} /> JOIN
+                  JOIN
                 </button>
               </div>
             </div>
