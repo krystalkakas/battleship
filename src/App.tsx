@@ -13,9 +13,11 @@ const SHIP_TYPES = [
 ];
 
 const SOUNDS = {
-  hit: 'https://actions.google.com/sounds/v1/explosions/artillery_fire.ogg',
-  miss: 'https://actions.google.com/sounds/v1/water/water_splash.ogg',
-  bgm: 'https://actions.google.com/sounds/v1/science_fiction/low_hum_loop.ogg'
+  hit: 'https://cdn.freesound.org/previews/536/536421_11881477-lq.mp3', // Explosion
+  miss: 'https://cdn.freesound.org/previews/273/273337_4486188-lq.mp3', // Splash
+  bgm: 'https://cdn.freesound.org/previews/655/655513_11537234-lq.mp3', // Ambient
+  turn: 'https://cdn.freesound.org/previews/215/215438_3943373-lq.mp3', // Notification
+  sunk: 'https://cdn.freesound.org/previews/414/414346_5121236-lq.mp3'  // Sinking
 };
 
 // --- Components ---
@@ -162,8 +164,10 @@ export default function App() {
   const [isMuted, setIsMuted] = useState(false);
   const bgmRef = useRef<HTMLAudioElement | null>(null);
   const lastShotCountRef = useRef<number>(0);
+  const lastTurnRef = useRef<string | null>(null);
+  const sunkShipsRef = useRef<Set<string>>(new Set());
 
-  // Placement State
+  const [notification, setNotification] = useState<string | null>(null);
   const [placedShips, setPlacedShips] = useState<Ship[]>([]);
   const [selectedShipLength, setSelectedShipLength] = useState<number | null>(SHIP_TYPES[0].length);
   const [orientation, setOrientation] = useState<'horizontal' | 'vertical'>('horizontal');
@@ -177,11 +181,16 @@ export default function App() {
     return total - placed;
   };
 
-  const playSfx = (type: 'hit' | 'miss') => {
+  const playSfx = (type: keyof typeof SOUNDS) => {
     if (isMuted) return;
     const audio = new Audio(SOUNDS[type]);
-    audio.volume = 0.5;
+    audio.volume = type === 'bgm' ? 0.2 : 0.6;
     audio.play().catch(() => {});
+  };
+
+  const showNotification = (msg: string) => {
+    setNotification(msg);
+    setTimeout(() => setNotification(null), 3000);
   };
 
   useEffect(() => {
@@ -217,15 +226,47 @@ export default function App() {
       } else if (msg.type === 'room_update') {
         const newRoom = msg.room;
         
-        // Detect new shots to play sound
-        const allNewShots = newRoom.players.flatMap(p => p.shots);
-        if (allNewShots.length > lastShotCountRef.current) {
-          const latestShot = allNewShots[allNewShots.length - 1];
-          if (latestShot) {
+        // Detect turn change
+        if (newRoom.phase === 'battle' && newRoom.turn !== lastTurnRef.current) {
+          if (newRoom.turn === myId) {
+            playSfx('turn');
+            showNotification('Đến lượt của bạn!');
+          }
+          lastTurnRef.current = newRoom.turn;
+        }
+
+        // Detect new shots and sunk ships
+        const allPlayers = newRoom.players;
+        const totalShots = allPlayers.flatMap(p => p.shots).length;
+        
+        if (totalShots > lastShotCountRef.current) {
+          const shooter = allPlayers.find(p => p.shots.length > (room?.players.find(oldP => oldP.id === p.id)?.shots.length || 0));
+          if (shooter) {
+            const latestShot = shooter.shots[shooter.shots.length - 1];
             playSfx(latestShot.hit ? 'hit' : 'miss');
+
+            // Check if a ship was sunk
+            const victim = allPlayers.find(p => p.id !== shooter.id);
+            if (victim && latestShot.hit) {
+              victim.ships.forEach(ship => {
+                if (sunkShipsRef.current.has(ship.id)) return;
+                
+                const isSunk = Array.from({ length: ship.length }).every((_, i) => {
+                  const sx = ship.orientation === 'horizontal' ? ship.x + i : ship.x;
+                  const sy = ship.orientation === 'vertical' ? ship.y + i : ship.y;
+                  return shooter.shots.some(s => s.x === sx && s.y === sy && s.hit);
+                });
+
+                if (isSunk) {
+                  sunkShipsRef.current.add(ship.id);
+                  playSfx('sunk');
+                  showNotification(`${shooter.id === myId ? 'Bạn' : 'Đối phương'} đã đánh chìm tàu ${ship.length} ô!`);
+                }
+              });
+            }
           }
         }
-        lastShotCountRef.current = allNewShots.length;
+        lastShotCountRef.current = totalShots;
         
         setRoom(newRoom);
       }
@@ -268,6 +309,9 @@ export default function App() {
     setRoom(null);
     setPlacedShips([]);
     setSelectedShipLength(SHIP_TYPES[0].length);
+    sunkShipsRef.current = new Set();
+    lastShotCountRef.current = 0;
+    lastTurnRef.current = null;
     fetchRooms();
   };
 
@@ -457,6 +501,20 @@ export default function App() {
 
       <audio ref={bgmRef} src={SOUNDS.bgm} loop />
 
+      {/* Notifications */}
+      <AnimatePresence>
+        {notification && (
+          <motion.div
+            initial={{ opacity: 0, y: -50, x: '-50%' }}
+            animate={{ opacity: 1, y: 20, x: '-50%' }}
+            exit={{ opacity: 0, y: -50, x: '-50%' }}
+            className="fixed top-20 left-1/2 z-50 bg-indigo-600 text-white px-6 py-3 rounded-full font-bold shadow-2xl border border-indigo-400 uppercase tracking-widest text-sm pointer-events-none"
+          >
+            {notification}
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       <div className="flex-1 grid lg:grid-cols-[1fr_400px] gap-8 max-w-7xl mx-auto w-full">
         {/* Main Game Area */}
         <div className="space-y-8">
@@ -595,7 +653,8 @@ export default function App() {
                     onMouseEnter={(x, y) => setBattleHover({ x, y })}
                     onMouseLeave={() => setBattleHover(null)}
                     targetable={room.turn === myId && !isSpectator}
-                    showShips={false}
+                    showShips={room.phase === 'finished'} // Reveal enemy ships at end
+                    ships={opponent?.ships} // Pass opponent ships to reveal
                   />
                 </div>
                 <div className="space-y-4">
@@ -613,28 +672,49 @@ export default function App() {
           )}
 
           {room.phase === 'finished' && (
-            <div className="flex flex-col items-center justify-center py-20 space-y-8">
-              <motion.div 
-                initial={{ scale: 0.8, opacity: 0 }}
-                animate={{ scale: 1, opacity: 1 }}
-                className="text-center space-y-4"
-              >
-                <div className="inline-block p-6 bg-yellow-500/20 rounded-full mb-4">
-                  <Trophy size={64} className="text-yellow-500" />
+            <div className="space-y-8">
+              <div className="flex flex-col items-center justify-center py-10 space-y-8">
+                <motion.div 
+                  initial={{ scale: 0.8, opacity: 0 }}
+                  animate={{ scale: 1, opacity: 1 }}
+                  className="text-center space-y-4"
+                >
+                  <div className="inline-block p-6 bg-yellow-500/20 rounded-full mb-4">
+                    <Trophy size={64} className="text-yellow-500" />
+                  </div>
+                  <h3 className="text-5xl font-black uppercase italic tracking-tighter">
+                    {room.winner === myId ? 'Chiến Thắng!' : 'Hạm Đội Bị Tiêu Diệt'}
+                  </h3>
+                  <p className="text-slate-400 uppercase tracking-widest">
+                    {room.winner === myId ? 'Hạm đội địch đã bị tiêu diệt hoàn toàn.' : 'Tàu của bạn đã bị đánh chìm. Hãy rút lui về căn cứ.'}
+                  </p>
+                </motion.div>
+                <button 
+                  onClick={leaveRoom}
+                  className="bg-white text-black px-8 py-3 rounded-lg font-bold hover:bg-slate-200 transition-colors uppercase tracking-widest text-sm"
+                >
+                  Quay lại cảng
+                </button>
+              </div>
+
+              <div className="grid md:grid-cols-2 gap-8">
+                <div className="space-y-4">
+                  <label className="block text-xs font-bold uppercase tracking-widest text-slate-500">Bản đồ đối phương (Đã lộ diện)</label>
+                  <GameGrid 
+                    ships={opponent?.ships}
+                    shots={me?.shots}
+                    showShips={true}
+                  />
                 </div>
-                <h3 className="text-5xl font-black uppercase italic tracking-tighter">
-                  {room.winner === myId ? 'Chiến Thắng!' : 'Hạm Đội Bị Tiêu Diệt'}
-                </h3>
-                <p className="text-slate-400 uppercase tracking-widest">
-                  {room.winner === myId ? 'Hạm đội địch đã bị tiêu diệt hoàn toàn.' : 'Tàu của bạn đã bị đánh chìm. Hãy rút lui về căn cứ.'}
-                </p>
-              </motion.div>
-              <button 
-                onClick={leaveRoom}
-                className="bg-white text-black px-8 py-3 rounded-lg font-bold hover:bg-slate-200 transition-colors uppercase tracking-widest text-sm"
-              >
-                Quay lại cảng
-              </button>
+                <div className="space-y-4">
+                  <label className="block text-xs font-bold uppercase tracking-widest text-slate-500">Bản đồ của bạn</label>
+                  <GameGrid 
+                    ships={me?.ships}
+                    shots={opponent?.shots}
+                    showShips={true}
+                  />
+                </div>
+              </div>
             </div>
           )}
         </div>
