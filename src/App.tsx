@@ -154,13 +154,28 @@ export default function App() {
   
   // Placement State
   const [placedShips, setPlacedShips] = useState<Ship[]>([]);
-  const [currentShipIndex, setCurrentShipIndex] = useState(0);
+  const [selectedShipLength, setSelectedShipLength] = useState<number | null>(SHIP_TYPES[0].length);
   const [orientation, setOrientation] = useState<'horizontal' | 'vertical'>('horizontal');
   const [hoverPos, setHoverPos] = useState<{ x: number, y: number } | null>(null);
 
   const [battleHover, setBattleHover] = useState<{ x: number, y: number } | null>(null);
 
-  const shipsToPlace = SHIP_TYPES.flatMap(t => Array(t.count).fill(t.length));
+  const getRemainingCount = (length: number) => {
+    const total = SHIP_TYPES.find(t => t.length === length)?.count || 0;
+    const placed = placedShips.filter(s => s.length === length).length;
+    return total - placed;
+  };
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.code === 'Space') {
+        e.preventDefault();
+        setOrientation(prev => prev === 'horizontal' ? 'vertical' : 'horizontal');
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
 
   useEffect(() => {
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -206,28 +221,32 @@ export default function App() {
     socket.send(JSON.stringify({ type: 'leave_room', roomId: room.id }));
     setRoom(null);
     setPlacedShips([]);
-    setCurrentShipIndex(0);
+    setSelectedShipLength(SHIP_TYPES[0].length);
     fetchRooms();
   };
 
   const handlePlacementClick = (x: number, y: number) => {
-    if (currentShipIndex >= shipsToPlace.length) return;
+    if (selectedShipLength === null) return;
+    if (getRemainingCount(selectedShipLength) <= 0) return;
     
-    const length = shipsToPlace[currentShipIndex];
-    if (isValidPlacement(x, y, length, orientation, placedShips)) {
+    if (isValidPlacement(x, y, selectedShipLength, orientation, placedShips)) {
       const newShip: Ship = {
         id: Math.random().toString(36).substring(7),
-        length,
+        length: selectedShipLength,
         x,
         y,
         orientation
       };
       const newPlaced = [...placedShips, newShip];
       setPlacedShips(newPlaced);
-      setCurrentShipIndex(currentShipIndex + 1);
-
-      if (currentShipIndex + 1 === shipsToPlace.length) {
-        // All ships placed
+      
+      // Auto select next ship type if current is exhausted
+      if (getRemainingCount(selectedShipLength) <= 1) {
+        const nextType = SHIP_TYPES.find(t => {
+          const placed = newPlaced.filter(s => s.length === t.length).length;
+          return placed < t.count;
+        });
+        setSelectedShipLength(nextType ? nextType.length : null);
       }
     }
   };
@@ -270,6 +289,8 @@ export default function App() {
   const me = room?.players.find(p => p.id === myId) || room?.players[0];
   const opponent = room?.players.find(p => p.id !== (isSpectator ? room?.players[0]?.id : myId)) || room?.players[1];
 
+  const totalShipsToPlace = SHIP_TYPES.reduce((acc, t) => acc + t.count, 0);
+
   if (!room) {
     return (
       <div className="min-h-screen bg-[#0a0a0c] text-white flex flex-col items-center justify-center p-6 font-sans">
@@ -279,16 +300,16 @@ export default function App() {
           className="w-full max-w-md space-y-8"
         >
           <div className="text-center space-y-2">
-            <h1 className="text-5xl font-black tracking-tighter uppercase italic text-indigo-500">Battleship</h1>
-            <p className="text-slate-400 text-sm tracking-widest uppercase">Multiplayer Naval Warfare</p>
+            <h1 className="text-5xl font-black tracking-tighter uppercase italic text-indigo-500">Bắn Thuyền</h1>
+            <p className="text-slate-400 text-sm tracking-widest uppercase">Chiến Tranh Hải Quân Trực Tuyến</p>
           </div>
 
           <div className="bg-slate-900/50 border border-white/10 p-8 rounded-2xl space-y-6 backdrop-blur-xl">
             <div className="space-y-4">
-              <label className="block text-xs font-bold uppercase tracking-widest text-slate-500">Your Callsign</label>
+              <label className="block text-xs font-bold uppercase tracking-widest text-slate-500">Tên của bạn</label>
               <input 
                 type="text" 
-                placeholder="ENTER NAME..."
+                placeholder="NHẬP TÊN..."
                 value={nameInput}
                 onChange={e => setNameInput(e.target.value)}
                 className="w-full bg-black/50 border border-white/10 rounded-lg px-4 py-3 focus:outline-none focus:border-indigo-500 transition-colors"
@@ -301,22 +322,22 @@ export default function App() {
                 className="w-full bg-indigo-600 hover:bg-indigo-500 py-4 rounded-xl font-black uppercase tracking-widest transition-all shadow-lg shadow-indigo-500/20 flex items-center justify-center gap-3 group"
               >
                 <Plus size={20} className="group-hover:rotate-90 transition-transform" /> 
-                Create New Battleground
+                Tạo Phòng Mới
               </button>
             </div>
 
             <div className="relative flex items-center py-2">
               <div className="flex-grow border-t border-white/5"></div>
-              <span className="flex-shrink mx-4 text-[10px] font-bold text-slate-600 uppercase tracking-widest">OR</span>
+              <span className="flex-shrink mx-4 text-[10px] font-bold text-slate-600 uppercase tracking-widest">HOẶC</span>
               <div className="flex-grow border-t border-white/5"></div>
             </div>
 
             <div className="space-y-4">
-              <label className="block text-xs font-bold uppercase tracking-widest text-slate-500">Join Existing Room</label>
+              <label className="block text-xs font-bold uppercase tracking-widest text-slate-500">Vào Phòng Có Sẵn</label>
               <div className="flex gap-2">
                 <input 
                   type="text" 
-                  placeholder="ROOM ID..."
+                  placeholder="MÃ PHÒNG..."
                   value={roomIdInput}
                   onChange={e => setRoomIdInput(e.target.value)}
                   className="flex-1 bg-black/50 border border-white/10 rounded-lg px-4 py-3 focus:outline-none focus:border-indigo-500 transition-colors font-mono"
@@ -325,14 +346,14 @@ export default function App() {
                   onClick={() => joinRoom(roomIdInput)}
                   className="bg-white/5 hover:bg-white/10 border border-white/10 px-6 rounded-lg font-bold transition-colors flex items-center gap-2"
                 >
-                  JOIN
+                  VÀO
                 </button>
               </div>
             </div>
 
             {availableRooms.length > 0 && (
               <div className="space-y-4 pt-4 border-t border-white/5">
-                <label className="block text-xs font-bold uppercase tracking-widest text-slate-500">Active Battlegrounds</label>
+                <label className="block text-xs font-bold uppercase tracking-widest text-slate-500">Các Trận Đánh Đang Diễn Ra</label>
                 <div className="space-y-2 max-h-48 overflow-y-auto pr-2">
                   {availableRooms.map(r => (
                     <button 
@@ -343,7 +364,7 @@ export default function App() {
                       <span className="font-mono text-sm">{r.id}</span>
                       <div className="flex items-center gap-4 text-xs text-slate-400">
                         <span className="flex items-center gap-1"><Users size={14} /> {r.playerCount}/2</span>
-                        <span className="uppercase tracking-tighter group-hover:text-indigo-400">{r.phase}</span>
+                        <span className="uppercase tracking-tighter group-hover:text-indigo-400">{r.phase === 'placement' ? 'Dàn trận' : r.phase === 'battle' ? 'Giao chiến' : 'Kết thúc'}</span>
                       </div>
                     </button>
                   ))}
@@ -365,9 +386,9 @@ export default function App() {
             <ShipIcon size={24} />
           </div>
           <div>
-            <h2 className="text-xl font-black tracking-tighter uppercase italic">Room: {room.id}</h2>
+            <h2 className="text-xl font-black tracking-tighter uppercase italic">Phòng: {room.id}</h2>
             <p className="text-xs text-slate-500 uppercase tracking-widest">
-              {isSpectator ? 'Spectating' : 'Active Combatant'}
+              {isSpectator ? 'Đang xem' : 'Đang chiến đấu'}
             </p>
           </div>
         </div>
@@ -375,7 +396,7 @@ export default function App() {
           onClick={leaveRoom}
           className="flex items-center gap-2 text-xs font-bold uppercase tracking-widest text-slate-500 hover:text-red-400 transition-colors"
         >
-          <LogOut size={16} /> Retreat
+          <LogOut size={16} /> Rút lui
         </button>
       </div>
 
@@ -385,74 +406,109 @@ export default function App() {
           {room.phase === 'placement' && !isSpectator && (
             <div className="space-y-6">
               <div className="flex items-center justify-between">
-                <h3 className="text-2xl font-bold uppercase tracking-tighter">Fleet Deployment</h3>
+                <h3 className="text-2xl font-bold uppercase tracking-tighter">Dàn Trận Hạm Đội</h3>
                 <div className="flex gap-4">
                   <button 
                     onClick={() => {
                       setPlacedShips([]);
-                      setCurrentShipIndex(0);
+                      setSelectedShipLength(SHIP_TYPES[0].length);
                     }}
                     className="flex items-center gap-2 bg-red-500/10 hover:bg-red-500/20 px-4 py-2 rounded-lg text-sm font-bold text-red-400 transition-colors"
                   >
-                    Reset
+                    Đặt lại
                   </button>
                   <button 
                     onClick={() => setOrientation(orientation === 'horizontal' ? 'vertical' : 'horizontal')}
                     className="flex items-center gap-2 bg-white/5 hover:bg-white/10 px-4 py-2 rounded-lg text-sm font-bold transition-colors"
                   >
-                    <RotateCw size={16} /> Rotate: {orientation.toUpperCase()}
+                    <RotateCw size={16} /> Xoay: {orientation === 'horizontal' ? 'NGANG' : 'DỌC'}
                   </button>
-                  {placedShips.length === shipsToPlace.length && !me?.isReady && (
+                  {placedShips.length === totalShipsToPlace && !me?.isReady && (
                     <button 
                       onClick={submitShips}
                       className="bg-green-600 hover:bg-green-500 px-6 py-2 rounded-lg font-bold transition-colors flex items-center gap-2"
                     >
-                      <Play size={16} /> READY FOR BATTLE
+                      <Play size={16} /> SẴN SÀNG CHIẾN ĐẤU
                     </button>
                   )}
                 </div>
               </div>
 
-              <div className="grid md:grid-cols-2 gap-8 items-start">
+              <div className="grid md:grid-cols-[1fr_300px] gap-8 items-start">
                 <div className="space-y-4">
                   <GameGrid 
                     ships={placedShips}
                     onCellClick={handlePlacementClick}
                     onMouseEnter={(x, y) => setHoverPos({ x, y })}
                     onMouseLeave={() => setHoverPos(null)}
-                    previewShip={hoverPos ? { 
+                    previewShip={hoverPos && selectedShipLength ? { 
                       ...hoverPos, 
-                      length: shipsToPlace[currentShipIndex], 
+                      length: selectedShipLength, 
                       orientation,
-                      isValid: isValidPlacement(hoverPos.x, hoverPos.y, shipsToPlace[currentShipIndex], orientation, placedShips)
+                      isValid: isValidPlacement(hoverPos.x, hoverPos.y, selectedShipLength, orientation, placedShips)
                     } : null}
                   />
-                  <div className="flex justify-center gap-2">
-                    {shipsToPlace.map((len, idx) => (
-                      <div 
-                        key={idx}
-                        className={`h-2 rounded-full transition-all duration-300 ${idx < currentShipIndex ? 'bg-indigo-500 w-8' : idx === currentShipIndex ? 'bg-white w-12' : 'bg-white/10 w-8'}`}
-                      />
-                    ))}
+                  <div className="bg-indigo-500/10 border border-indigo-500/20 p-4 rounded-lg flex items-center gap-3">
+                    <div className="bg-indigo-500 p-2 rounded-full">
+                      <Play size={16} />
+                    </div>
+                    <p className="text-xs text-indigo-300 font-medium">
+                      Mẹo: Nhấn <span className="bg-indigo-500/20 px-1.5 py-0.5 rounded font-bold text-white">SPACE</span> để xoay tàu nhanh. Click vào lưới để đặt tàu.
+                    </p>
                   </div>
                 </div>
 
-                <div className="bg-slate-900/50 border border-white/10 p-6 rounded-xl space-y-4">
-                  <h4 className="text-xs font-bold uppercase tracking-widest text-slate-500">Deployment Orders</h4>
-                  <p className="text-sm text-slate-300 leading-relaxed">
-                    Position your fleet on the grid. Your opponent cannot see your ships. 
-                    Once all ships are placed, signal your readiness to begin the engagement.
-                  </p>
-                  <div className="space-y-2 pt-4">
-                    <div className="flex justify-between text-xs">
-                      <span className="text-slate-500">Ships Placed:</span>
-                      <span className="font-mono">{placedShips.length} / {shipsToPlace.length}</span>
+                <div className="space-y-6">
+                  <div className="bg-slate-900/50 border border-white/10 p-6 rounded-xl space-y-4">
+                    <h4 className="text-xs font-bold uppercase tracking-widest text-slate-500">Chọn Tàu Để Đặt</h4>
+                    <div className="space-y-3">
+                      {SHIP_TYPES.map(type => {
+                        const remaining = getRemainingCount(type.length);
+                        return (
+                          <button
+                            key={type.length}
+                            disabled={remaining <= 0}
+                            onClick={() => setSelectedShipLength(type.length)}
+                            className={`w-full flex items-center justify-between p-3 rounded-lg border transition-all ${
+                              selectedShipLength === type.length 
+                                ? 'bg-indigo-600 border-indigo-400 shadow-lg shadow-indigo-500/20' 
+                                : remaining <= 0 
+                                  ? 'bg-black/20 border-white/5 opacity-40 cursor-not-allowed' 
+                                  : 'bg-white/5 border-white/10 hover:border-white/30'
+                            }`}
+                          >
+                            <div className="flex items-center gap-3">
+                              <div className="flex gap-1">
+                                {Array(type.length).fill(0).map((_, i) => (
+                                  <div key={i} className={`w-3 h-3 rounded-sm ${selectedShipLength === type.length ? 'bg-white' : 'bg-indigo-500'}`} />
+                                ))}
+                              </div>
+                              <span className="text-xs font-bold">Tàu {type.length} ô</span>
+                            </div>
+                            <span className="text-[10px] font-mono opacity-60">Còn {remaining}</span>
+                          </button>
+                        );
+                      })}
                     </div>
-                    <div className="w-full bg-white/5 h-1 rounded-full overflow-hidden">
-                      <div 
-                        className="bg-indigo-500 h-full transition-all duration-500" 
-                        style={{ width: `${(placedShips.length / shipsToPlace.length) * 100}%` }}
-                      />
+                  </div>
+
+                  <div className="bg-slate-900/50 border border-white/10 p-6 rounded-xl space-y-4">
+                    <h4 className="text-xs font-bold uppercase tracking-widest text-slate-500">Mệnh Lệnh Dàn Quân</h4>
+                    <p className="text-sm text-slate-300 leading-relaxed">
+                      Sắp xếp hạm đội của bạn trên lưới. Đối phương sẽ không thấy tàu của bạn. 
+                      Khi đã sẵn sàng, hãy nhấn nút bắt đầu để tham chiến.
+                    </p>
+                    <div className="space-y-2 pt-4">
+                      <div className="flex justify-between text-xs">
+                        <span className="text-slate-500">Tàu đã đặt:</span>
+                        <span className="font-mono">{placedShips.length} / {totalShipsToPlace}</span>
+                      </div>
+                      <div className="w-full bg-white/5 h-1 rounded-full overflow-hidden">
+                        <div 
+                          className="bg-indigo-500 h-full transition-all duration-500" 
+                          style={{ width: `${(placedShips.length / totalShipsToPlace) * 100}%` }}
+                        />
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -464,9 +520,9 @@ export default function App() {
             <div className="space-y-6">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-4">
-                  <h3 className="text-2xl font-bold uppercase tracking-tighter">Combat Phase</h3>
+                  <h3 className="text-2xl font-bold uppercase tracking-tighter">Giai Đoạn Giao Chiến</h3>
                   <div className={`px-3 py-1 rounded text-xs font-bold uppercase tracking-widest ${room.turn === myId ? 'bg-indigo-500 text-white animate-pulse' : 'bg-white/5 text-slate-500'}`}>
-                    {room.turn === myId ? 'Your Turn' : "Opponent's Turn"}
+                    {room.turn === myId ? 'Lượt của bạn' : "Lượt đối phương"}
                   </div>
                 </div>
               </div>
@@ -474,7 +530,7 @@ export default function App() {
               <div className="grid md:grid-cols-2 gap-8">
                 <div className="space-y-4">
                   <label className="block text-xs font-bold uppercase tracking-widest text-slate-500 flex items-center gap-2">
-                    <Target size={14} className="text-red-500" /> Target Grid (Enemy Waters)
+                    <Target size={14} className="text-red-500" /> Lưới Tấn Công (Vùng biển địch)
                   </label>
                   <GameGrid 
                     shots={me?.shots || []}
@@ -487,7 +543,7 @@ export default function App() {
                 </div>
                 <div className="space-y-4">
                   <label className="block text-xs font-bold uppercase tracking-widest text-slate-500 flex items-center gap-2">
-                    <ShipIcon size={14} className="text-indigo-500" /> Your Fleet (Home Waters)
+                    <ShipIcon size={14} className="text-indigo-500" /> Hạm Đội Của Bạn (Vùng biển nhà)
                   </label>
                   <GameGrid 
                     ships={me?.ships}
@@ -510,17 +566,17 @@ export default function App() {
                   <Trophy size={64} className="text-yellow-500" />
                 </div>
                 <h3 className="text-5xl font-black uppercase italic tracking-tighter">
-                  {room.winner === myId ? 'Victory Achieved' : 'Fleet Destroyed'}
+                  {room.winner === myId ? 'Chiến Thắng!' : 'Hạm Đội Bị Tiêu Diệt'}
                 </h3>
                 <p className="text-slate-400 uppercase tracking-widest">
-                  {room.winner === myId ? 'The enemy fleet has been neutralized.' : 'Your fleet has been sunk. Retreat to base.'}
+                  {room.winner === myId ? 'Hạm đội địch đã bị tiêu diệt hoàn toàn.' : 'Tàu của bạn đã bị đánh chìm. Hãy rút lui về căn cứ.'}
                 </p>
               </motion.div>
               <button 
                 onClick={leaveRoom}
                 className="bg-white text-black px-8 py-3 rounded-lg font-bold hover:bg-slate-200 transition-colors uppercase tracking-widest text-sm"
               >
-                Return to Port
+                Quay lại cảng
               </button>
             </div>
           )}
@@ -530,7 +586,7 @@ export default function App() {
         <div className="space-y-6">
           <div className="bg-slate-900/50 border border-white/10 p-6 rounded-xl space-y-6">
             <h4 className="text-xs font-bold uppercase tracking-widest text-slate-500 flex items-center gap-2">
-              <Users size={14} /> Tactical Intel
+              <Users size={14} /> Tình Báo Chiến Thuật
             </h4>
             
             <div className="space-y-4">
@@ -538,32 +594,32 @@ export default function App() {
                 <div key={p.id} className={`flex items-center justify-between p-3 rounded-lg border ${p.id === myId ? 'bg-indigo-500/10 border-indigo-500/30' : 'bg-white/5 border-white/5'}`}>
                   <div className="flex items-center gap-3">
                     <div className={`w-2 h-2 rounded-full ${p.isReady ? 'bg-green-500' : 'bg-yellow-500'}`} />
-                    <span className="font-bold text-sm uppercase tracking-tight">{p.name} {p.id === myId && '(YOU)'}</span>
+                    <span className="font-bold text-sm uppercase tracking-tight">{p.name} {p.id === myId && '(BẠN)'}</span>
                   </div>
                   <div className="text-xs font-mono text-slate-400">
-                    {p.shots.filter(s => s.hit).length} HITS
+                    {p.shots.filter(s => s.hit).length} TRÚNG
                   </div>
                 </div>
               ))}
               {room.spectators.length > 0 && (
                 <div className="pt-4 border-t border-white/5">
-                  <span className="text-[10px] font-bold uppercase tracking-widest text-slate-600">Spectators ({room.spectators.length})</span>
+                  <span className="text-[10px] font-bold uppercase tracking-widest text-slate-600">Khán giả ({room.spectators.length})</span>
                 </div>
               )}
             </div>
 
             {room.phase === 'battle' && (
               <div className="space-y-4 pt-4 border-t border-white/5">
-                <h5 className="text-[10px] font-bold uppercase tracking-widest text-slate-500">Combat Log</h5>
+                <h5 className="text-[10px] font-bold uppercase tracking-widest text-slate-500">Nhật Ký Chiến Đấu</h5>
                 <div className="space-y-2 max-h-40 overflow-y-auto text-[10px] font-mono text-slate-400">
                   {[...(me?.shots || []), ...(opponent?.shots || [])]
-                    .sort((a, b) => 0) // Just a placeholder for actual log logic if needed
+                    .sort((a, b) => 0) 
                     .slice(-5)
                     .map((s, i) => (
                       <div key={i} className="flex items-center gap-2">
                         <span className="text-slate-600">[{new Date().toLocaleTimeString()}]</span>
                         <span className={s.hit ? 'text-red-400' : 'text-slate-500'}>
-                          {s.hit ? 'DIRECT HIT' : 'SPLASH'} AT {String.fromCharCode(65 + s.y)}{s.x + 1}
+                          {s.hit ? 'TRÚNG ĐÍCH' : 'HỤT'} TẠI {String.fromCharCode(65 + s.y)}{s.x + 1}
                         </span>
                       </div>
                     ))}
@@ -573,11 +629,11 @@ export default function App() {
           </div>
 
           <div className="bg-indigo-600/10 border border-indigo-500/20 p-6 rounded-xl">
-            <h4 className="text-xs font-bold uppercase tracking-widest text-indigo-400 mb-2">Mission Briefing</h4>
+            <h4 className="text-xs font-bold uppercase tracking-widest text-indigo-400 mb-2">Nhiệm Vụ Chiến Đấu</h4>
             <p className="text-xs text-indigo-300/70 leading-relaxed">
-              Locate and destroy all 5 enemy vessels. 
-              A hit grants an immediate follow-up strike. 
-              Coordinate with your fleet and maintain tactical superiority.
+              Tìm và tiêu diệt toàn bộ 5 tàu của địch. 
+              Bắn trúng sẽ được bắn tiếp. 
+              Hãy phối hợp và duy trì ưu thế chiến thuật.
             </p>
           </div>
         </div>
@@ -585,3 +641,4 @@ export default function App() {
     </div>
   );
 }
+
