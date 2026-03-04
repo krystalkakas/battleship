@@ -1,0 +1,5 @@
+{
+  "name": "Battleship Online",
+  "description": "A real-time multiplayer Battleship game with room support and spectator mode.",
+  "requestFramePermissions": []
+}
