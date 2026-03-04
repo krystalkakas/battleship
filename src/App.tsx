@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Ship, Shot, Player, GameRoom, Message } from './types';
 import { motion, AnimatePresence } from 'motion/react';
-import { Target, Ship as ShipIcon, Users, Trophy, LogOut, Plus, Play, RotateCw } from 'lucide-react';
+import { Target, Ship as ShipIcon, Users, Trophy, LogOut, Plus, Play, RotateCw, Volume2, VolumeX } from 'lucide-react';
 
 // --- Constants ---
 const GRID_SIZE = 10;
@@ -11,6 +11,12 @@ const SHIP_TYPES = [
   { length: 3, count: 1 },
   { length: 2, count: 1 },
 ];
+
+const SOUNDS = {
+  hit: 'https://actions.google.com/sounds/v1/explosions/artillery_fire.ogg',
+  miss: 'https://actions.google.com/sounds/v1/water/water_splash.ogg',
+  bgm: 'https://actions.google.com/sounds/v1/science_fiction/low_hum_loop.ogg'
+};
 
 // --- Components ---
 
@@ -152,6 +158,11 @@ export default function App() {
   const [nameInput, setNameInput] = useState('');
   const [availableRooms, setAvailableRooms] = useState<any[]>([]);
   
+  // Audio State
+  const [isMuted, setIsMuted] = useState(false);
+  const bgmRef = useRef<HTMLAudioElement | null>(null);
+  const lastShotCountRef = useRef<number>(0);
+
   // Placement State
   const [placedShips, setPlacedShips] = useState<Ship[]>([]);
   const [selectedShipLength, setSelectedShipLength] = useState<number | null>(SHIP_TYPES[0].length);
@@ -166,6 +177,13 @@ export default function App() {
     return total - placed;
   };
 
+  const playSfx = (type: 'hit' | 'miss') => {
+    if (isMuted) return;
+    const audio = new Audio(SOUNDS[type]);
+    audio.volume = 0.5;
+    audio.play().catch(() => {});
+  };
+
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.code === 'Space') {
@@ -178,6 +196,17 @@ export default function App() {
   }, []);
 
   useEffect(() => {
+    if (bgmRef.current) {
+      bgmRef.current.muted = isMuted;
+      if (!isMuted) {
+        bgmRef.current.play().catch(() => {});
+      } else {
+        bgmRef.current.pause();
+      }
+    }
+  }, [isMuted]);
+
+  useEffect(() => {
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     const ws = new WebSocket(`${protocol}//${window.location.host}`);
     
@@ -186,7 +215,19 @@ export default function App() {
       if (msg.type === 'init') {
         setMyId(msg.id);
       } else if (msg.type === 'room_update') {
-        setRoom(msg.room);
+        const newRoom = msg.room;
+        
+        // Detect new shots to play sound
+        const allNewShots = newRoom.players.flatMap(p => p.shots);
+        if (allNewShots.length > lastShotCountRef.current) {
+          const latestShot = allNewShots[allNewShots.length - 1];
+          if (latestShot) {
+            playSfx(latestShot.hit ? 'hit' : 'miss');
+          }
+        }
+        lastShotCountRef.current = allNewShots.length;
+        
+        setRoom(newRoom);
       }
     };
 
@@ -194,7 +235,7 @@ export default function App() {
     fetchRooms();
 
     return () => ws.close();
-  }, []);
+  }, [isMuted]);
 
   const fetchRooms = async () => {
     try {
@@ -209,6 +250,11 @@ export default function App() {
   const joinRoom = (id: string) => {
     if (!socket || !id.trim()) return;
     socket.send(JSON.stringify({ type: 'join_room', roomId: id.trim().toUpperCase(), name: nameInput }));
+    
+    // Start music on first interaction
+    if (bgmRef.current && !isMuted) {
+      bgmRef.current.play().catch(() => {});
+    }
   };
 
   const createRoom = () => {
@@ -392,13 +438,24 @@ export default function App() {
             </p>
           </div>
         </div>
-        <button 
-          onClick={leaveRoom}
-          className="flex items-center gap-2 text-xs font-bold uppercase tracking-widest text-slate-500 hover:text-red-400 transition-colors"
-        >
-          <LogOut size={16} /> Rút lui
-        </button>
+        <div className="flex items-center gap-4">
+          <button 
+            onClick={() => setIsMuted(!isMuted)}
+            className="p-2 bg-white/5 hover:bg-white/10 rounded-lg transition-colors text-slate-400 hover:text-white"
+            title={isMuted ? "Bật âm thanh" : "Tắt âm thanh"}
+          >
+            {isMuted ? <VolumeX size={20} /> : <Volume2 size={20} />}
+          </button>
+          <button 
+            onClick={leaveRoom}
+            className="flex items-center gap-2 text-xs font-bold uppercase tracking-widest text-slate-500 hover:text-red-400 transition-colors"
+          >
+            <LogOut size={16} /> Rút lui
+          </button>
+        </div>
       </div>
+
+      <audio ref={bgmRef} src={SOUNDS.bgm} loop />
 
       <div className="flex-1 grid lg:grid-cols-[1fr_400px] gap-8 max-w-7xl mx-auto w-full">
         {/* Main Game Area */}
